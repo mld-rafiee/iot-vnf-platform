@@ -10,7 +10,7 @@ venv/
 **/.terraform/
 *.tfstate
 *.tfstate.backup
-*.tfvars        # contains secrets - never commit
+*.tfvars
 
 # K8s secrets
 *-secret.yaml
