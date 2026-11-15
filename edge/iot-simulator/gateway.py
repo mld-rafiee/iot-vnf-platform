@@ -193,7 +193,6 @@ class Gateway:
             p = multiprocessing.Process(
                 target=_producer_worker,
                 args=(i, queue, self.config, stop_event),
-                daemon=True,
             )
             p.start()
             producers.append(p)

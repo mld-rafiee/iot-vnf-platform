@@ -104,7 +104,6 @@ def main():
                 p = multiprocessing.Process(
                     target=run_gateway,
                     args=(gateway_id, devices_per_gw, config),
-                    daemon=True,
                 )
                 p.start()
                 active_processes.append(p)
