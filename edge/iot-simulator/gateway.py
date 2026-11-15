@@ -1,47 +1,40 @@
 """
 IoT Gateway — one instance per software gateway.
 
-Responsibilities:
-  1. Create N IoT devices (mixed types)
-  2. Run each device in a thread at its configured rate
-  3. Buffer all messages in a shared deque
-  4. Batch messages (batch_size from config)
-  5. Rate-limit sends using NNE 4G/5G speeds
-  6. Send batches to Kafka topics
+Uses multiprocessing to bypass Python GIL:
+each producer process gets its own CPU core.
 """
 import collections
 import json
 import logging
+import multiprocessing
 import random
 import threading
 import time
-import uuid
 
-from kafka import KafkaProducer
-from kafka.errors import KafkaError
+from confluent_kafka import Producer as ConfluentProducer
 
 from devices import EnvironmentalSensor, IndustrialSensor, NetworkSensor
 from nne import NNEBandwidthShaper
 
 log = logging.getLogger(__name__)
 
-# Internal buffer limit — not user-configurable (memory protection)
 _BUFFER_SIZE = 1_000_000
 
-# Sensor type distribution: 40% env, 30% industrial, 30% network
-# Matches real IoT deployments (more environmental in smart city/building)
 _SENSOR_DISTRIBUTION = [
     (EnvironmentalSensor, 0.4),
     (IndustrialSensor, 0.3),
     (NetworkSensor, 0.3),
 ]
 
+# Number of parallel producer processes per gateway
+# Each gets its own CPU core — bypasses GIL
+_NUM_PRODUCERS = 4
+
 
 def _create_devices(n: int, gateway_id: str, rates: list) -> list:
-    """Create N devices with realistic type distribution."""
     devices = []
     for _ in range(n):
-        # Pick type based on distribution weights
         rand = random.random()
         cumulative = 0
         chosen_class = EnvironmentalSensor
@@ -56,168 +49,180 @@ def _create_devices(n: int, gateway_id: str, rates: list) -> list:
     return devices
 
 
-def _device_worker(sensor, buffer: collections.deque, stop_event: threading.Event):
-    """
-    Thread worker for one IoT device.
-    Generates messages at sensor.rate messages/second.
-    """
+def _device_worker(sensor, queue: multiprocessing.Queue, stop_event):
     interval = 1.0 / sensor.rate
     while not stop_event.is_set():
         message = sensor.generate()
-        if len(buffer) >= _BUFFER_SIZE:
-            buffer.popleft()  # Drop oldest if full
-        buffer.append(message)
+        try:
+            queue.put_nowait(message)
+        except Exception:
+            pass  # Drop if queue full
         time.sleep(interval)
 
 
+def _producer_worker(
+    worker_id: int,
+    queue: multiprocessing.Queue,
+    config: dict,
+    stop_event,
+):
+    """
+    One producer process — runs on its own CPU core.
+    Reads from shared queue, sends to Kafka.
+    """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    )
+    log = logging.getLogger(f"producer-{worker_id}")
+
+    bootstrap = config["kafka"]["bootstrap_servers"]
+    topics = config["kafka"]["topics"]
+    batch_size = config["sensor"]["batch_size"]
+    report_interval = config["logging"]["report_interval_seconds"]
+
+    nne_cfg = config["nne"]
+    shaper = NNEBandwidthShaper(
+        csv_path=nne_cfg["csv_path"],
+        rate_column=nne_cfg["rate_column"],
+        update_interval_seconds=nne_cfg["update_interval_seconds"],
+    )
+
+    producer = ConfluentProducer({
+        "bootstrap.servers": bootstrap,
+        "acks": "1",
+        "linger.ms": 50,
+        "batch.size": 131072,
+        "compression.type": "lz4",
+        "queue.buffering.max.messages": 500000,
+        "queue.buffering.max.kbytes": 524288,
+    })
+
+    total_bytes = 0
+    last_report = time.time()
+    window_bytes = 0
+    window_start = time.time()
+
+    while not stop_event.is_set():
+        batch = []
+        try:
+            while len(batch) < batch_size:
+                try:
+                    msg = queue.get_nowait()
+                    batch.append(msg)
+                except Exception:
+                    break
+        except Exception:
+            pass
+
+        if not batch:
+            time.sleep(0.005)
+            continue
+
+        rate_bps = shaper.current_rate_bytes_per_sec() / _NUM_PRODUCERS
+        batch_bytes = 0
+
+        for msg in batch:
+            topic_key = msg.get("sfc_target")
+            topic = topics["sfc1_ingress"] if topic_key == "sfc1" \
+                else topics["sfc2_ingress"]
+
+            msg_value = json.dumps(msg).encode("utf-8")
+            msg_key = msg["sensor_id"].encode("utf-8")
+            batch_bytes += len(msg_value)
+
+            try:
+                producer.produce(topic, key=msg_key, value=msg_value)
+                producer.produce(topics["raw"], key=msg_key, value=msg_value)
+            except Exception as e:
+                log.error(f"Kafka error: {e}")
+
+        producer.poll(0)
+
+        # Token bucket rate limiting
+        window_bytes += batch_bytes
+        window_elapsed = time.time() - window_start
+        if window_elapsed > 0:
+            current_rate = window_bytes / window_elapsed
+            if current_rate > rate_bps:
+                sleep_time = (window_bytes / rate_bps) - window_elapsed
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+        if time.time() - window_start >= 1.0:
+            window_bytes = 0
+            window_start = time.time()
+
+        total_bytes += batch_bytes
+        now = time.time()
+        elapsed = now - last_report
+        if elapsed >= report_interval:
+            rate_mbps = (total_bytes * 8) / (elapsed * 1_000_000)
+            nne_mbps = shaper.current_rate_mbps()
+            log.info(
+                f"TX rate: {rate_mbps:.2f} Mbps | "
+                f"NNE target: {nne_mbps:.2f} Mbps | "
+                f"Queue: {queue.qsize()}"
+            )
+            total_bytes = 0
+            last_report = now
+
+    producer.flush()
+
+
 class Gateway:
-    """
-    One software IoT gateway managing N devices.
-    Mirrors the architecture from your paper exactly.
-    """
 
     def __init__(self, gateway_id: str, num_devices: int, config: dict):
         self.gateway_id = gateway_id
         self.num_devices = num_devices
         self.config = config
-
-        self._buffer = collections.deque()
-        self._stop_event = threading.Event()
-        self._threads = []
-
-        # Kafka producer
-        self._producer = self._create_producer()
-
-        # NNE bandwidth shaper
-        nne_cfg = config["nne"]
-        self._shaper = NNEBandwidthShaper(
-            csv_path=nne_cfg["csv_path"],
-            rate_column=nne_cfg["rate_column"],
-            update_interval_seconds=nne_cfg["update_interval_seconds"],
-        )
-
-        # Topics
-        self._topics = config["kafka"]["topics"]
-        self._batch_size = config["sensor"]["batch_size"]
         self._rates = config["sensor"]["rates_per_second"]
-        self._report_interval = config["logging"]["report_interval_seconds"]
-
-    def _create_producer(self) -> KafkaProducer:
-        bootstrap = self.config["kafka"]["bootstrap_servers"]
-        log.info(f"[{self.gateway_id}] Connecting to Kafka at {bootstrap}")
-        return KafkaProducer(
-            bootstrap_servers=bootstrap,
-            value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-            key_serializer=lambda k: k.encode("utf-8"),
-            acks=1,                   # Wait for leader acknowledgment
-            retries=3,
-            linger_ms=5,              # Small batching delay for efficiency
-        )
 
     def start(self):
-        """Start all device threads and the sender loop."""
         log.info(
-            f"[{self.gateway_id}] Starting {self.num_devices} devices"
+            f"[{self.gateway_id}] Starting {self.num_devices} devices "
+            f"with {_NUM_PRODUCERS} producer processes"
         )
 
-        # Create and start device threads
+        # Shared queue between device threads and producer processes
+        queue = multiprocessing.Queue(maxsize=_BUFFER_SIZE)
+        stop_event = multiprocessing.Event()
+
+        # Start producer processes (each on its own CPU core)
+        producers = []
+        for i in range(_NUM_PRODUCERS):
+            p = multiprocessing.Process(
+                target=_producer_worker,
+                args=(i, queue, self.config, stop_event),
+                daemon=True,
+            )
+            p.start()
+            producers.append(p)
+            log.info(f"[{self.gateway_id}] Producer process {i} started (PID {p.pid})")
+
+        # Start device threads (share the queue)
         devices = _create_devices(
             self.num_devices, self.gateway_id, self._rates
         )
+        threads = []
+        thread_stop = threading.Event()
         for sensor in devices:
             t = threading.Thread(
                 target=_device_worker,
-                args=(sensor, self._buffer, self._stop_event),
+                args=(sensor, queue, thread_stop),
                 daemon=True,
             )
             t.start()
-            self._threads.append(t)
+            threads.append(t)
 
-        # Run the send loop in the main gateway thread
-        self._send_loop()
+        log.info(f"[{self.gateway_id}] All {len(devices)} devices started")
 
-    def stop(self):
-        """Signal all threads to stop."""
-        log.info(f"[{self.gateway_id}] Stopping...")
-        self._stop_event.set()
-
-    def _send_loop(self):
-        """
-        Main loop:
-        1. Wait for batch_size messages in buffer
-        2. Get current NNE rate
-        3. Send batch to Kafka at that rate
-        4. Report throughput every report_interval seconds
-        """
-        total_bytes_sent = 0
-        last_report_time = time.time()
-
-        while not self._stop_event.is_set():
-            # Wait until we have a full batch
-            if len(self._buffer) < self._batch_size:
-                time.sleep(0.01)
-                continue
-
-            # Pull one batch from buffer
-            batch = []
-            for _ in range(self._batch_size):
-                if self._buffer:
-                    batch.append(self._buffer.popleft())
-
-            if not batch:
-                continue
-
-            # Get current 4G/5G rate from NNE
-            rate_bytes_per_sec = self._shaper.current_rate_bytes_per_sec()
-
-            # Send messages to Kafka with rate limiting
-            batch_bytes = 0
-            for msg in batch:
-                topic_key = msg.get("sfc_target")
-                if topic_key == "sfc1":
-                    topic = self._topics["sfc1_ingress"]
-                else:
-                    topic = self._topics["sfc2_ingress"]
-
-                msg_bytes = json.dumps(msg).encode("utf-8")
-                batch_bytes += len(msg_bytes)
-
-                try:
-                    self._producer.send(
-                        topic,
-                        key=msg["sensor_id"],
-                        value=msg,
-                    )
-                    # Also send everything to raw topic (data lake)
-                    self._producer.send(
-                        self._topics["raw"],
-                        key=msg["sensor_id"],
-                        value=msg,
-                    )
-                except KafkaError as e:
-                    log.error(f"[{self.gateway_id}] Kafka error: {e}")
-
-            # Flush the producer
-            self._producer.flush()
-
-            # Rate limiting: sleep based on NNE bandwidth
-            if rate_bytes_per_sec > 0:
-                sleep_time = batch_bytes / rate_bytes_per_sec
-                time.sleep(sleep_time * 0.2)  # 20% sleep (match original code)
-
-            total_bytes_sent += batch_bytes
-
-            # Report transmission rate
-            now = time.time()
-            elapsed = now - last_report_time
-            if elapsed >= self._report_interval:
-                rate_mbps = (total_bytes_sent * 8) / (elapsed * 1_000_000)
-                nne_mbps = self._shaper.current_rate_mbps()
-                log.info(
-                    f"[{self.gateway_id}] "
-                    f"TX rate: {rate_mbps:.2f} Mbps | "
-                    f"NNE target: {nne_mbps:.2f} Mbps | "
-                    f"Buffer: {len(self._buffer)}"
-                )
-                total_bytes_sent = 0
-                last_report_time = now
+        try:
+            # Keep main process alive
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            log.info(f"[{self.gateway_id}] Stopping...")
+            thread_stop.set()
+            stop_event.set()
+            for p in producers:
+                p.join(timeout=5)
