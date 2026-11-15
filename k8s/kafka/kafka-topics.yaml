@@ -1,0 +1,65 @@
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: iot-raw
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: iot-kafka
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000  # 7 days
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: sfc1-ingress
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: iot-kafka
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: sfc2-ingress
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: iot-kafka
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: sfc1-egress
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: iot-kafka
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: sfc2-egress
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: iot-kafka
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000

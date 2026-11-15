@@ -7,8 +7,11 @@ spec:
   project: default
   source:
     repoURL: https://github.com/mld-rafiee/iot-vnf-platform
-    targetRevision: main
+    targetRevision: develop
     path: k8s
+    directory:
+      recurse: true              # scan all subdirectories
+      exclude: "argocd/**"      # don't try to deploy ArgoCD's own config
   destination:
     server: https://kubernetes.default.svc
     namespace: default
@@ -16,3 +19,6 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - RespectIgnoreDifferences=true

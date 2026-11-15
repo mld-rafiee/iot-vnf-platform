@@ -1,0 +1,71 @@
+# ─────────────────────────────────────────────────────────────────
+# IoT VNF Platform — Simulator Configuration
+# ─────────────────────────────────────────────────────────────────
+
+kafka:
+  bootstrap_servers: "iot-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+  topics:
+    raw: "iot-raw"
+    sfc1_ingress: "sfc1-ingress"
+    sfc2_ingress: "sfc2-ingress"
+
+nne:
+  csv_path: "config/node_950_C.csv"
+  rate_column: "speedtest_ul_mbps"
+  update_interval_seconds: 60
+
+sensor:
+  rates_per_second: [4, 12, 25, 50]
+  batch_size: 4000
+
+gateway:
+  cycle_duration_seconds: 1800
+
+scaling:
+  mode: "dynamic"   # "dynamic" or "fixed"
+
+  fixed:
+    gateways: 1
+    devices_per_gateway: 1000
+
+  dynamic:
+    weekday:
+      - name: "night"
+        hours: [0, 1, 2, 3, 4, 5]
+        gateways: 1
+        devices_per_gateway: 1000
+
+      - name: "morning_ramp"
+        hours: [6, 7, 8]
+        gateways: 10
+        devices_per_gateway: 1000
+
+      - name: "business_peak"
+        hours: [9, 10, 11, 12, 13, 14, 15, 16]
+        gateways: 25
+        devices_per_gateway: 1000
+
+      - name: "evening_shoulder"
+        hours: [17, 18, 19]
+        gateways: 10
+        devices_per_gateway: 1000
+
+      - name: "night_winddown"
+        hours: [20, 21, 22, 23]
+        gateways: 1
+        devices_per_gateway: 1000
+
+    weekend:
+      - name: "weekend_low"
+        hours: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 20, 21, 22, 23]
+        gateways: 1
+        devices_per_gateway: 1000
+
+      - name: "weekend_mid"
+        hours: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+        gateways: 10
+        devices_per_gateway: 1000
+
+logging:
+  level: "INFO"
+  report_interval_seconds: 1

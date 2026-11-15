@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iot-simulator
+  namespace: iot
+  labels:
+    app: iot-simulator
+    component: edge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: iot-simulator
+  template:
+    metadata:
+      labels:
+        app: iot-simulator
+        component: edge
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: edge-node
+      containers:
+        - name: iot-simulator
+          image: ghcr.io/mld-rafiee/iot-vnf-platform/iot-simulator:latest
+          imagePullPolicy: Always
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          resources:
+            requests:
+              cpu: "800m"
+              memory: "1Gi"
+            limits:
+              cpu: "1000m"    # edge-node has 1 vCPU max
+              memory: "1.5Gi"

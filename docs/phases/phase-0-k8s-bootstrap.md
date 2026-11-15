@@ -1,27 +1,37 @@
-# Phase 0 — Kubernetes Bootstrap
+# Phase 0 — Kubernetes Bootstrap + ArgoCD
 
 ## Status: Complete ✅
 
-## What was done
-- Prepared all 9 nodes (swap off, kernel modules, containerd)
-- Installed kubeadm v1.31.14 on all nodes
-- Initialized control plane on master (158.39.74.183)
-- Installed Calico CNI (pod-network-cidr: 192.168.0.0/16)
-- Joined all 8 workers to the cluster
-- Labeled all nodes by role
+## What Was Built
 
-## Node Map
-| Node | IP | Role | VNF |
-|------|----|------|-----|
-| master | 158.39.74.183 | control-plane | - |
-| worker-1 | 158.39.201.139 | vnf | firewall-1 |
-| worker-2 | 158.39.77.61 | vnf | firewall-2 |
-| worker-3 | 158.37.65.211 | vnf | dpi |
-| worker-4 | 158.39.74.172 | vnf | encryption |
-| worker-5 | 158.39.74.232 | vnf | compression |
-| worker-6 | 158.39.74.241 | vnf | nat |
-| tool-node-1 | 158.37.65.177 | data-engineering | - |
-| edge-node | 158.37.65.44 | edge | - |
+### Kubernetes Cluster
+- 9-node cluster bootstrapped with kubeadm on NREC
+- Kubernetes version: v1.31.14
+- CNI: Calico in VXLAN mode (required for cross-subnet routing between NREC subnets)
+
+### Node Map
+| Node | Flavor | Role |
+|------|--------|------|
+| master | c1.2xlarge | K8s control plane |
+| worker-1 | c1.medium | VNF: Firewall-1 |
+| worker-2 | c1.medium | VNF: Firewall-2 |
+| worker-3 | c1.medium | VNF: DPI (shared) |
+| worker-4 | c1.medium | VNF: Encryption |
+| worker-5 | c1.medium | VNF: Compression |
+| worker-6 | c1.medium | VNF: NAT |
+| tool-node-1 | c1.xlarge | Data engineering tools |
+| edge-node | c1.xlarge | Edge: IoT Simulator |
+
+### GitOps — ArgoCD
+- Installed in `argocd` namespace
+- Watches `develop` branch automatically
+- Every merge to `develop` triggers auto-deploy
+- Access: `kubectl port-forward svc/argocd-server -n argocd 8080:443`
 
 ## Verify
+
+```bash
 kubectl get nodes
+kubectl get pods -n argocd
+kubectl get applications -n argocd
+```

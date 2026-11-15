@@ -1,0 +1,15 @@
+# This file is a placeholder for the NNE (NorNet Edge) dataset.
+# The real file is not included in this repository.
+#
+# Format (semicolon-delimited CSV):
+# node_950
+# ts;node_id;network_id;service_id;scnt;rcnt;pkt_loss_rate;rtt_avg;rtt_median;rtt_std;rtt_min;rtt_max;rtt_q90;speedtest_ul_mbps;speedtest_dl_mbps;speedtest_jitter
+# 2023-11-01 00:00:00;950;2;1;3596;3596;0.0;0.07;0.07;0.01;0.03;0.11;0.08;31.68;89.41;22.15
+#
+# To obtain the dataset:
+# The NNE dataset is collected by the NorNet Edge project across Norway.
+# Reference: Ocampo et al. (2024), "Reinforcement Learning for..."
+# Contact: https://www.nntb.no/
+#
+# Place the real CSV file at:
+# edge/iot-simulator/config/node_950_C.csv
