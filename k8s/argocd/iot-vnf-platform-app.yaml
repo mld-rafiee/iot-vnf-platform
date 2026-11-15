@@ -16,3 +16,6 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      - CreateNamespace=true      # ArgoCD creates namespaces automatically
+      - RespectIgnoreDifferences=true
