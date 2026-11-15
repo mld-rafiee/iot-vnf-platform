@@ -61,7 +61,7 @@ DPI is shared between both chains.
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 0 | K8s bootstrap + ArgoCD | 🔄 In progress |
-| 1 | Kafka + IoT data flow | ⏳ Pending |
+| 1 | Kafka + IoT simulator | ✅ Complete |
 | 2 | VNF chain deployment | ⏳ Pending |
 | 3 | Data lake + warehouse | ⏳ Pending |
 | 4 | Monitoring | ⏳ Pending |
