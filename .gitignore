@@ -30,3 +30,5 @@ dbt/logs/
 
 # NNE dataset — proprietary, do not commit
 edge/iot-simulator/config/node_950_C.csv
+
+docs/phases/private
