@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dpi
+  namespace: vnf
+  labels:
+    app: dpi
+    sfc: shared
+    vnf-type: dpi
+    app.kubernetes.io/part-of: iot-vnf-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dpi
+  template:
+    metadata:
+      labels:
+        app: dpi
+        sfc: shared
+        vnf-type: dpi
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+    spec:
+      # DPI is shared between SFC1 and SFC2 — pinned to worker-3
+      nodeSelector:
+        node-role.kubernetes.io/vnf: dpi
+
+      containers:
+        - name: dpi
+          image: ghcr.io/mld-rafiee/iot-vnf-platform/dpi:latest
+          imagePullPolicy: Always
+
+          env:
+            - name: VNF_NAME
+              value: "dpi"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "iot-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+            - name: UDP_INPUT_PORT
+              value: "9001"
+            # SFC1 → Encryption on worker-4
+            - name: SFC1_NEXT_HOP_HOST
+              value: "encryption-svc.vnf.svc.cluster.local"
+            - name: SFC1_NEXT_HOP_PORT
+              value: "9002"
+            # SFC2 → NAT on worker-6
+            - name: SFC2_NEXT_HOP_HOST
+              value: "nat-svc.vnf.svc.cluster.local"
+            - name: SFC2_NEXT_HOP_PORT
+              value: "9004"
+            - name: SNORT_CONFIG
+              value: "/etc/snort/snort.lua"
+            - name: SNORT_RULES_DIR
+              value: "/etc/snort/rules"
+            - name: SNORT_ALERT_LOG
+              value: "/var/log/snort/alert_fast.txt"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+
+          ports:
+            - containerPort: 9001
+              protocol: UDP
+              name: udp-input
+            - containerPort: 8000
+              name: metrics-w0
+            - containerPort: 8001
+              name: metrics-w1
+            - containerPort: 8002
+              name: metrics-w2
+            - containerPort: 8003
+              name: metrics-w3
+            - containerPort: 8010
+              name: health
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8010
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8010
+            initialDelaySeconds: 15
+            periodSeconds: 5
+
+          resources:
+            requests:
+              cpu: "600m"
+              memory: "512Mi"
+            limits:
+              cpu: "900m"
+              memory: "768Mi"
+
+          volumeMounts:
+            - name: snort-logs
+              mountPath: /var/log/snort
+
+      volumes:
+        - name: snort-logs
+          emptyDir: {}
+---
+# Service — gives DPI a stable DNS name for firewalls to target
+apiVersion: v1
+kind: Service
+metadata:
+  name: dpi-svc
+  namespace: vnf
+  labels:
+    app: dpi
+    app.kubernetes.io/part-of: iot-vnf-platform
+spec:
+  selector:
+    app: dpi
+  ports:
+    - name: udp-input
+      protocol: UDP
+      port: 9001
+      targetPort: 9001
+  type: ClusterIP

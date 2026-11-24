@@ -1,0 +1,213 @@
+# IoT-specific anomaly detection rules for Snort3
+# Covers sensor value anomalies, replay attacks, and
+# IoT-protocol-specific attack patterns
+#
+# Rule SID range: 9002001-9002999
+# Reference: ETSI EN 303 645, NIST SP 800-213, IEC 62443-3-3
+
+# ---------------------------------------------------------------------------
+# SENSOR VALUE ANOMALIES
+# Physical impossibility checks — values outside hardware limits
+# ---------------------------------------------------------------------------
+
+# Temperature: realistic range -50°C to +150°C
+# Values above 200°C indicate spoofed/manipulated data
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Temperature sensor - extreme high value (>200C)";
+    content:"temperature";
+    pcre:"/\"value\"\s*:\s*[2-9][0-9]{2,}/";
+    classtype:misc-anomaly;
+    sid:9002001; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Temperature sensor - extreme low value (<-100C)";
+    content:"temperature";
+    pcre:"/\"value\"\s*:\s*-[1-9][0-9]{2,}/";
+    classtype:misc-anomaly;
+    sid:9002002; rev:1;
+)
+
+# Humidity: 0-100%. Values above 100% are physically impossible
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Humidity sensor - value exceeds 100 percent";
+    content:"humidity";
+    pcre:"/\"value\"\s*:\s*1[0-9]{2,}\./";
+    classtype:misc-anomaly;
+    sid:9002003; rev:1;
+)
+
+# CO2: realistic range 400-5000 ppm
+# Above 10000 ppm is anomalous in normal environments
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY CO2 sensor - extremely high value (>10000 ppm)";
+    content:"co2";
+    pcre:"/\"value\"\s*:\s*[1-9][0-9]{4,}/";
+    classtype:misc-anomaly;
+    sid:9002004; rev:1;
+)
+
+# Packet loss: 0-100%. Above 100% is impossible
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Packet loss - impossible value above 100 percent";
+    content:"packet_loss";
+    pcre:"/\"value\"\s*:\s*1[0-9]{2,}\./";
+    classtype:misc-anomaly;
+    sid:9002005; rev:1;
+)
+
+# Negative values for inherently non-negative sensors
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Network latency - negative value (physical impossibility)";
+    content:"latency";
+    pcre:"/\"value\"\s*:\s*-[0-9]+/";
+    classtype:misc-anomaly;
+    sid:9002006; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Throughput sensor - negative value";
+    content:"throughput";
+    pcre:"/\"value\"\s*:\s*-[0-9]+/";
+    classtype:misc-anomaly;
+    sid:9002007; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Vibration sensor - negative value";
+    content:"vibration";
+    pcre:"/\"value\"\s*:\s*-[0-9]+/";
+    classtype:misc-anomaly;
+    sid:9002008; rev:1;
+)
+
+# Power: negative wattage is physically impossible
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Power sensor - negative wattage";
+    content:"power";
+    pcre:"/\"value\"\s*:\s*-[0-9]+/";
+    classtype:misc-anomaly;
+    sid:9002009; rev:1;
+)
+
+# ---------------------------------------------------------------------------
+# REPLAY ATTACK DETECTION
+# Timestamp-based anomalies — messages with timestamps in the past
+# ---------------------------------------------------------------------------
+
+# Timestamp value of 0 indicates epoch start (1970) — likely replay
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Replay attack - zero timestamp (epoch start)";
+    content:"timestamp";
+    pcre:"/\"timestamp\"\s*:\s*0(\.0*)?\s*[,}]/";
+    classtype:misc-anomaly;
+    sid:9002010; rev:1;
+)
+
+# Timestamp before 2020 — clearly replayed old data
+# Unix timestamp for 2020-01-01: 1577836800
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Replay attack - timestamp before 2020";
+    content:"timestamp";
+    pcre:"/\"timestamp\"\s*:\s*1[0-4][0-9]{8}/";
+    classtype:misc-anomaly;
+    sid:9002011; rev:1;
+)
+
+# ---------------------------------------------------------------------------
+# INJECTION IN FIELD VALUES
+# Attempts to inject malicious content in string fields
+# ---------------------------------------------------------------------------
+
+# Script injection in sensor_id
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY XSS in sensor_id field";
+    content:"sensor_id";
+    pcre:"/\"sensor_id\"\s*:\s*\"[^\"]*<script/i";
+    classtype:web-application-attack;
+    sid:9002020; rev:1;
+)
+
+# Null byte injection — classic string termination attack
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Null byte injection in payload";
+    content:"|00|";
+    classtype:web-application-attack;
+    sid:9002021; rev:1;
+)
+
+# ---------------------------------------------------------------------------
+# SFC ROUTING ANOMALIES
+# ---------------------------------------------------------------------------
+
+# Unknown sfc_target value — not sfc1 or sfc2
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Unknown SFC target - possible routing attack";
+    content:"sfc_target";
+    not content:"sfc1";
+    not content:"sfc2";
+    classtype:policy-violation;
+    sid:9002030; rev:1;
+)
+
+# Network sensor (packet_loss/latency/throughput) targeting SFC1
+# These should ONLY go to SFC2
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Network sensor routed to SFC1 (wrong chain)";
+    content:"packet_loss";
+    content:"sfc1";
+    classtype:policy-violation;
+    sid:9002031; rev:1;
+)
+
+# ---------------------------------------------------------------------------
+# BOTNET / C2 INDICATORS SPECIFIC TO IoT
+# Based on known IoT botnet patterns (Mirai, Mozi, Bashlite)
+# ---------------------------------------------------------------------------
+
+# Mirai scanning pattern in payload
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Mirai botnet payload signature";
+    content:"|53 65 6c 65 63 74|";   # "Select" in hex
+    content:"busybox"; nocase;
+    classtype:trojan-activity;
+    sid:9002040; rev:1;
+)
+
+# Mozi DHT botnet pattern
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Mozi DHT botnet pattern";
+    pcre:"/\[ss\]|mozi\.a|mozi\.m/i";
+    classtype:trojan-activity;
+    sid:9002041; rev:1;
+)
+
+# Encoded C2 beacon pattern
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Possible C2 beacon - repeated encoded pattern";
+    pcre:"/([A-Za-z0-9+\/]{20,}={0,2})\1{2,}/";
+    classtype:trojan-activity;
+    sid:9002042; rev:1;
+)
+
+# ---------------------------------------------------------------------------
+# DATA INTEGRITY
+# ---------------------------------------------------------------------------
+
+# Duplicate sensor_id in same message (malformed)
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Duplicate sensor_id field (malformed message)";
+    pcre:"/\"sensor_id\"\s*:.*\"sensor_id\"\s*:/s";
+    classtype:protocol-command-decode;
+    sid:9002050; rev:1;
+)
+
+# Non-JSON content on IoT port (unexpected protocol)
+alert udp any any -> any 9001 (
+    msg:"IOT-ANOMALY Non-JSON content on IoT port";
+    not content:"{";
+    not content:"[";
+    dsize:>10;
+    classtype:protocol-command-decode;
+    sid:9002051; rev:1;
+)

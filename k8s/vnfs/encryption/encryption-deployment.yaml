@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: encryption
+  namespace: vnf
+  labels:
+    app: encryption
+    sfc: sfc1
+    vnf-type: encryption
+    app.kubernetes.io/part-of: iot-vnf-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: encryption
+  template:
+    metadata:
+      labels:
+        app: encryption
+        sfc: sfc1
+        vnf-type: encryption
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/vnf: encryption
+
+      containers:
+        - name: encryption
+          image: ghcr.io/mld-rafiee/iot-vnf-platform/encryption:latest
+          imagePullPolicy: Always
+
+          env:
+            - name: VNF_NAME
+              value: "encryption"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "iot-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+            - name: UDP_INPUT_PORT
+              value: "9002"
+            - name: NEXT_HOP_HOST
+              value: "compression-svc.vnf.svc.cluster.local"
+            - name: NEXT_HOP_PORT
+              value: "9003"
+            # AES key loaded from Kubernetes Secret
+            - name: AES_KEY_HEX
+              valueFrom:
+                secretKeyRef:
+                  name: enc-key
+                  key: AES_KEY_HEX
+            - name: PYTHONUNBUFFERED
+              value: "1"
+
+          ports:
+            - containerPort: 9002
+              protocol: UDP
+              name: udp-input
+            - containerPort: 8000
+              name: metrics-w0
+            - containerPort: 8001
+              name: metrics-w1
+            - containerPort: 8002
+              name: metrics-w2
+            - containerPort: 8003
+              name: metrics-w3
+            - containerPort: 8010
+              name: health
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8010
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8010
+            initialDelaySeconds: 10
+            periodSeconds: 5
+
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+            limits:
+              cpu: "900m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: encryption-svc
+  namespace: vnf
+  labels:
+    app: encryption
+    app.kubernetes.io/part-of: iot-vnf-platform
+spec:
+  selector:
+    app: encryption
+  ports:
+    - name: udp-input
+      protocol: UDP
+      port: 9002
+      targetPort: 9002
+  type: ClusterIP

@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: compression
+  namespace: vnf
+  labels:
+    app: compression
+    sfc: sfc1
+    vnf-type: compression
+    app.kubernetes.io/part-of: iot-vnf-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: compression
+  template:
+    metadata:
+      labels:
+        app: compression
+        sfc: sfc1
+        vnf-type: compression
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/vnf: compression
+
+      containers:
+        - name: compression
+          image: ghcr.io/mld-rafiee/iot-vnf-platform/compression:latest
+          imagePullPolicy: Always
+
+          env:
+            - name: VNF_NAME
+              value: "compression"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "iot-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+            - name: UDP_INPUT_PORT
+              value: "9003"
+            - name: OUTPUT_TOPIC
+              value: "sfc1-egress"
+            - name: BROTLI_QUALITY
+              value: "4"
+            - name: BROTLI_LGWIN
+              value: "22"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+
+          ports:
+            - containerPort: 9003
+              protocol: UDP
+              name: udp-input
+            - containerPort: 8000
+              name: metrics-w0
+            - containerPort: 8001
+              name: metrics-w1
+            - containerPort: 8002
+              name: metrics-w2
+            - containerPort: 8003
+              name: metrics-w3
+            - containerPort: 8010
+              name: health
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8010
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8010
+            initialDelaySeconds: 10
+            periodSeconds: 5
+
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+            limits:
+              cpu: "900m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: compression-svc
+  namespace: vnf
+  labels:
+    app: compression
+    app.kubernetes.io/part-of: iot-vnf-platform
+spec:
+  selector:
+    app: compression
+  ports:
+    - name: udp-input
+      protocol: UDP
+      port: 9003
+      targetPort: 9003
+  type: ClusterIP
