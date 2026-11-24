@@ -1,0 +1,216 @@
+# Local Snort3 rules for IoT VNF DPI
+# Covers web attacks, injection, recon, and exfiltration
+# Applied to IoT sensor message payloads on UDP port 9001
+#
+# Rule SID range: 9001001-9001999 (local custom rules)
+# Reference: Snort Community Rule Writing Guide
+
+# ---------------------------------------------------------------------------
+# SQL INJECTION DETECTION
+# ---------------------------------------------------------------------------
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI SQL Injection - UNION SELECT";
+    content:"UNION"; nocase;
+    content:"SELECT"; nocase; distance:0; within:20;
+    classtype:web-application-attack;
+    sid:9001001; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI SQL Injection - OR 1=1 pattern";
+    pcre:"/('\s*OR\s*'1'\s*=\s*'1|'\s*OR\s*1\s*=\s*1)/i";
+    classtype:web-application-attack;
+    sid:9001002; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI SQL Injection - Comment sequence";
+    pcre:"/(\-\-|\#|\/\*)/";
+    content:"SELECT"; nocase;
+    classtype:web-application-attack;
+    sid:9001003; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI SQL Injection - DROP TABLE";
+    content:"DROP"; nocase;
+    content:"TABLE"; nocase; distance:0; within:10;
+    classtype:web-application-attack;
+    sid:9001004; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI SQL Injection - INSERT INTO";
+    content:"INSERT"; nocase;
+    content:"INTO"; nocase; distance:0; within:10;
+    classtype:web-application-attack;
+    sid:9001005; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI SQL Injection - Timing attack SLEEP/BENCHMARK";
+    pcre:"/(sleep|benchmark|waitfor\s+delay|pg_sleep)\s*\(/i";
+    classtype:web-application-attack;
+    sid:9001006; rev:1;
+)
+
+# ---------------------------------------------------------------------------
+# COMMAND/SHELL INJECTION
+# ---------------------------------------------------------------------------
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI Shell Injection - /bin/sh execution";
+    content:"/bin/sh";
+    classtype:shellcode-detect;
+    sid:9001010; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI Shell Injection - /bin/bash execution";
+    content:"/bin/bash";
+    classtype:shellcode-detect;
+    sid:9001011; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI Shell Injection - Subshell substitution";
+    content:"$(";
+    classtype:shellcode-detect;
+    sid:9001012; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI Shell Injection - Backtick execution";
+    pcre:"/`[^`]+`/";
+    classtype:shellcode-detect;
+    sid:9001013; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI Shell Injection - Command chaining";
+    pcre:"/(;|\|\|?|&&)\s*(ls|cat|rm|wget|curl|nc|ncat|python|perl|php)/";
+    classtype:shellcode-detect;
+    sid:9001014; rev:1;
+)
+
+# ---------------------------------------------------------------------------
+# PROTOCOL VIOLATIONS
+# ---------------------------------------------------------------------------
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI Protocol Violation - Missing sensor_id field";
+    not content:"sensor_id";
+    classtype:protocol-command-decode;
+    sid:9001020; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI Protocol Violation - Missing gateway_id field";
+    not content:"gateway_id";
+    classtype:protocol-command-decode;
+    sid:9001021; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI Protocol Violation - Missing sfc_target field";
+    not content:"sfc_target";
+    classtype:protocol-command-decode;
+    sid:9001022; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI Protocol Violation - Invalid sfc_target value";
+    content:"sfc_target";
+    not content:"sfc1";
+    not content:"sfc2";
+    classtype:protocol-command-decode;
+    sid:9001023; rev:1;
+)
+
+# ---------------------------------------------------------------------------
+# DENIAL OF SERVICE
+# ---------------------------------------------------------------------------
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI DoS - Oversized payload";
+    dsize:>60000;
+    classtype:denial-of-service;
+    sid:9001030; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI DoS - Flood from single source";
+    detection_filter:track by_src, count 10000, seconds 1;
+    classtype:denial-of-service;
+    sid:9001031; rev:1;
+)
+
+# ---------------------------------------------------------------------------
+# DATA EXFILTRATION INDICATORS
+# ---------------------------------------------------------------------------
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI Exfil - Large Base64 encoded data";
+    pcre:"/[A-Za-z0-9+\/]{2000,}={0,2}/";
+    classtype:policy-violation;
+    sid:9001040; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI Exfil - Hex-encoded payload";
+    pcre:"/\\\\x[0-9a-fA-F]{2}(\\\\x[0-9a-fA-F]{2}){20,}/";
+    classtype:policy-violation;
+    sid:9001041; rev:1;
+)
+
+# ---------------------------------------------------------------------------
+# RECONNAISSANCE
+# ---------------------------------------------------------------------------
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI Recon - Directory traversal attempt";
+    pcre:"/(\.\.(\/|\\\\)){2,}/";
+    classtype:attempted-recon;
+    sid:9001050; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI Recon - System file access attempt";
+    pcre:"/\/(etc\/passwd|etc\/shadow|proc\/self|windows\/system32)/i";
+    classtype:attempted-recon;
+    sid:9001051; rev:1;
+)
+
+# ---------------------------------------------------------------------------
+# MALWARE INDICATORS
+# ---------------------------------------------------------------------------
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI Malware - Reverse shell indicator";
+    pcre:"/(\/bin\/(sh|bash|nc|ncat)|cmd\.exe|powershell)/i";
+    classtype:trojan-activity;
+    sid:9001060; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI Malware - Wget/Curl download attempt";
+    pcre:"/(wget|curl)\s+https?:\/\//i";
+    classtype:trojan-activity;
+    sid:9001061; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI Malware - Mirai botnet pattern";
+    content:"busybox";
+    pcre:"/busybox\s+(ECCHI|wget|tftp)/i";
+    classtype:trojan-activity;
+    sid:9001062; rev:1;
+)
+
+alert udp any any -> any 9001 (
+    msg:"IOT-DPI Malware - Known IoT malware string";
+    pcre:"/(mirai|botnet|c2server|payload\.bin|dropper)/i";
+    classtype:trojan-activity;
+    sid:9001063; rev:1;
+)
