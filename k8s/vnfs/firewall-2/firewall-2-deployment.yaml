@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: firewall-2
+  namespace: vnf
+  labels:
+    app: firewall-2
+    sfc: sfc2
+    vnf-type: firewall
+    app.kubernetes.io/part-of: iot-vnf-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: firewall-2
+  template:
+    metadata:
+      labels:
+        app: firewall-2
+        sfc: sfc2
+        vnf-type: firewall
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/vnf: firewall-2
+
+      securityContext:
+        sysctls:
+          - name: net.ipv4.ip_forward
+            value: "1"
+
+      containers:
+        - name: firewall-2
+          image: ghcr.io/mld-rafiee/iot-vnf-platform/firewall:latest
+          imagePullPolicy: Always
+
+          env:
+            - name: VNF_NAME
+              value: "firewall-2"
+            - name: SFC_CHAIN
+              value: "sfc2"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "iot-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+            - name: NEXT_HOP_HOST
+              value: "dpi-svc.vnf.svc.cluster.local"
+            - name: NEXT_HOP_PORT
+              value: "9001"
+            - name: RULES_PATH
+              value: "/app/config/rules.json"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+
+          ports:
+            - containerPort: 8000
+              name: metrics-w0
+            - containerPort: 8001
+              name: metrics-w1
+            - containerPort: 8002
+              name: metrics-w2
+            - containerPort: 8003
+              name: metrics-w3
+            - containerPort: 8010
+              name: health
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8010
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8010
+            initialDelaySeconds: 10
+            periodSeconds: 5
+
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+            limits:
+              cpu: "900m"
+              memory: "512Mi"

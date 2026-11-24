@@ -1,0 +1,106 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nat
+  namespace: vnf
+  labels:
+    app: nat
+    sfc: sfc2
+    vnf-type: nat
+    app.kubernetes.io/part-of: iot-vnf-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nat
+  template:
+    metadata:
+      labels:
+        app: nat
+        sfc: sfc2
+        vnf-type: nat
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/vnf: nat
+
+      containers:
+        - name: nat
+          image: ghcr.io/mld-rafiee/iot-vnf-platform/nat:latest
+          imagePullPolicy: Always
+
+          env:
+            - name: VNF_NAME
+              value: "nat"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "iot-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+            - name: UDP_INPUT_PORT
+              value: "9004"
+            - name: OUTPUT_TOPIC
+              value: "sfc2-egress"
+            - name: NAT_PUBLIC_ID
+              value: "nat-gateway-public"
+            - name: NAT_POOL_START
+              value: "10000"
+            - name: NAT_POOL_END
+              value: "60000"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+
+          ports:
+            - containerPort: 9004
+              protocol: UDP
+              name: udp-input
+            - containerPort: 8000
+              name: metrics-w0
+            - containerPort: 8001
+              name: metrics-w1
+            - containerPort: 8002
+              name: metrics-w2
+            - containerPort: 8003
+              name: metrics-w3
+            - containerPort: 8010
+              name: health
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8010
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8010
+            initialDelaySeconds: 10
+            periodSeconds: 5
+
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+            limits:
+              cpu: "900m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nat-svc
+  namespace: vnf
+  labels:
+    app: nat
+    app.kubernetes.io/part-of: iot-vnf-platform
+spec:
+  selector:
+    app: nat
+  ports:
+    - name: udp-input
+      protocol: UDP
+      port: 9004
+      targetPort: 9004
+  type: ClusterIP
