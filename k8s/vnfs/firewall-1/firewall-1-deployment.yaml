@@ -28,13 +28,6 @@ spec:
       nodeSelector:
         node-role.kubernetes.io/vnf: firewall-1
 
-      # nftables requires NET_ADMIN capability
-      # Required to apply firewall rules in the container
-      securityContext:
-        sysctls:
-          - name: net.ipv4.ip_forward
-            value: "1"
-
       containers:
         - name: firewall-1
           image: ghcr.io/mld-rafiee/iot-vnf-platform/firewall:latest
