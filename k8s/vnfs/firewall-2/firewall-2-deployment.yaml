@@ -26,11 +26,6 @@ spec:
       nodeSelector:
         node-role.kubernetes.io/vnf: firewall-2
 
-      securityContext:
-        sysctls:
-          - name: net.ipv4.ip_forward
-            value: "1"
-
       containers:
         - name: firewall-2
           image: ghcr.io/mld-rafiee/iot-vnf-platform/firewall:latest
